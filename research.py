@@ -1,82 +1,62 @@
 from pathlib import Path
 import hashlib
 import csv
-import datetime
+from datetime import datetime
 import xml.etree.ElementTree as ET
 from lxml import etree as LET
+from lxml import etree as ET
 import getpass
 import uuid
-
-def checksum_for_file(file_path: Path) -> str:
-    hasher = hashlib.md5()
-    
-    with file_path.open("rb") as f:
-        for chunk in iter(lambda: f.read(8192), b""):
-            hasher.update(chunk)
-        return hasher.hexdigest()
-
-def build_xml(parent, folder_path: Path):
-    folder_el = ET.SubElement(
-        parent, "folder", {"name": folder_path.name, "last_modified": datetime.fromtimestamp(folder_path.stat().st_mtime).isoformat(),},)
-    
-    for path in sorted(folder_path.iterdir()):
-        if path.is_dir():
-            build_xml(folder_el, path)
-        elif path.is_file():
-            checksum = checksum_for_file(path)
-            attrs = {"name": path.name, "last_modified": datetime.datetime.fromtimestamp(path.stat().st_mtime).isoformat(),
-                     "size": str(path.stat().st_size), "MD5": checksum,}
-            if path.name.startswith("."):
-                attrs["hidden"] = "true"
-
-            file_el = ET.SubElement(folder_el, "file", attrs)
             
-def run_data_accessioner(data_directory, output_folder, accession_number):
-    data_directory = Path(data_directory)
-    output_directory = Path(output_folder)
-    output_directory.mkdir(parents = True, exist_ok = True)
+def generate_data_accessioner_xml(data_directory, output_folder, accession_number):
+    NSMAP = {None: "http://dataaccessioner.org/schema/dda-1-1",
+            "premis": "info:lc/xmlns/premis-v2",
+            "da": "http://dataaccessioner.org/saxon-extension",
+            "fits": "http://hul.harvard.edu/ois/xml/ns/fits/fits_output"}
+    collection_el = ET.Element("collection", nsmap = NSMAP, name = "")
+    accession_el = ET.SubElement(collection_el, "accession", number = accession_number)
 
-    all_reports = []
+    now = datetime.now()
+    ET.SubElement(accession_el, "ingest_note").text = f"transferred on {now.strftime('%a %b %d %H:%M:%S %Z %Y')}"
+    ET.SubElement(accession_el, "ingest_time").text = "00:00:00.00000"
 
-    all_directories = [data_directory] + [p for p in data_directory.rglob("*") if p.is_dir()]
+    def add_folder(parent_el, folder_path):
+        folder_el = ET.SubElement(parent_el, "folder", name = folder_path.name)
+        for item in folder_path.iterdir():
+            if item.is_file():
+                add_file(folder_el, item)
+            elif item.is_dir():
+                add_folder(folder_el, item)
 
-    for subfolder in all_directories:
-        if subfolder.is_dir():
-            relative_subfolder = subfolder.relative_to(data_directory)
+    def add_file(parent_el, file_path):
+        stat = file_path.stat()
+        checksum = hashlib.md5(file_path.read_bytes()).hexdigest()
+        file_el = ET.SubElement(parent_el, "file", name = file_path.name,
+                                last_modified = datetime.fromtimestamp(stat.st_mtime).isoformat(),
+                                size = str(stat.st_size), MD5 = checksum)
 
+        premis_obj = ET.SubElement(file_el, "{info:lc/xmlns/premis-v2}object", nsmap = NSMAP)
 
-            report_xml = output_directory / f"{accession_number}.xml"
-            report_csv = output_directory / f"{accession_number}.csv"
+        premis_id = ET.SubElement(premis_obj, "{info:lc/xmlns/premis-v2}objectIdentifier")
+        ET.SubElement(premis_id, "{info:lc/xmlns/premis-v2}objectIdentifierType").text = "uuid"
+        ET.SubElement(premis_id, "{info:lc/xmlns/premis-v2}objectIdentifierValue").text = str(uuid.uuid4())
+        
+        premis_char = ET.SubElement(premis_obj, "{info:lc/xmlns/premis-v2}objectCharacteristics")
+        fixity = ET.SubElement(premis_char, "{info:lc/xmlns/premis-v2}fixity")
+        ET.SubElement(fixity, "{info:lc/xmlns/premis-v2}messageDigestAlgorithm").text = "MD5"
+        ET.SubElement(fixity, "{info:lc/xmlns/premis-v2}messageDigest").text = checksum
+        ET.SubElement(fixity, "{info:lc/xmlns/premis-v2}messageDigestOriginator").text = "Python DataAccessioner Script"
+        ET.SubElement(premis_char, "{info:lc/xmlns/premis-v2}size").text = str(stat.st_size)
+        ET.SubElement(premis_obj, "{info:lc/xmlns/premis-v2}originalName").text = file_path.name
 
-            root = ET.Element("dataaccessioner")
-            rows = []
+    add_folder(accession_el, Path(data_directory))
 
-            for path in subfolder.rglob("*"):
-                if path.is_file():
-                    checksum = hashlib.md5(path.read_bytes()).hexdigest()
-
-                    file_el = ET.SubElement(root, "file")
-                    ET.SubElement(file_el, "name").text = path.name
-                    ET.SubElement(file_el, "checksum").text = checksum
-                    ET.SubElement(file_el, "directory").text = str(path.parent)
-
-                    rows.append({"directory path": str(path.parent), "filename": path.name, "checksum": checksum})
-            if rows:
-                #write XML
-                tree = ET.ElementTree(root)
-                tree.write(report_xml, encoding="utf-8", xml_declaration = True)
-
-            #write CSV
-            with open(report_csv, "w", newline="", encoding="utf-8") as f:
-                writer = csv.DictWriter(f, fieldnames = ["directory path", "filename", "checksum"])
-                writer.writeheader()
-                writer.writerows(rows)
-
-            all_reports.append((report_xml, report_csv))
-
-
-    print("Data Accessioner complete. Reports in", output_directory)
-    return all_reports, output_directory
+    tree = ET.ElementTree(collection_el)
+    output_file = Path(output_folder) / f"{accession_number}.xml"
+    tree.write(str(output_file), encoding = "UTF-8", xml_declaration = True, pretty_print = True)
+    
+    print(f"Data Accessioner complete! XML in {output_file}")
+    return output_file
 
 def run_xslt_processor(xml_input, xslt_file, output_file):
     xml_tree = LET.parse(str(xml_input))
@@ -99,11 +79,10 @@ if __name__ == "__main__":
     #Data Accessioner
     folder = "output"
     accession_number = "2025-101"
-    data = Path(r"M:\Working Groups\DSU\Art on Campus\Exhibitions\2011-2012\Pamphlets")
+    data = Path(r"M:\Working Groups\DSU\Art on Campus\UNI Art Exhibitions 2011-2012\Pamphlets")
 
-    all_reports, out_dir = run_data_accessioner(data, folder, accession_number)
+    xml_report = generate_data_accessioner_xml(data, folder, accession_number)
 
-    print("Output directory:", out_dir)
 
     print("\n-----------------------------------------------\n")
 
@@ -111,18 +90,16 @@ if __name__ == "__main__":
     #XSLT Processor
     xslt_csv = Path(r"C:\Users\Public\Desktop\XSLTProcessor-1.2\xslt\files.csv.xslt")
     xslt_html = Path(r"C:\Users\Public\Desktop\XSLTProcessor-1.2\xslt\files.html.xslt")
-    for xml_report, csv_report in all_reports:
-        csv_transformed = xml_report.with_name(xml_report.stem + "xslt.csv")
-        html_transformed = xml_report.with_name(xml_report.stem + "xslt.html")
+    csv_transformed = xml_report.with_name(xml_report.stem + "_files.csv")
+    html_transformed = xml_report.with_name(xml_report.stem + "_files.html")
 
-        run_xslt_processor(xml_report, xslt_csv, csv_transformed)
-        run_xslt_processor(xml_report, xslt_html, html_transformed)
+    run_xslt_processor(xml_report, xslt_csv, csv_transformed)
+    run_xslt_processor(xml_report, xslt_html, html_transformed)
 
-    print("XSLT Processor complete.")
+    print("XSLT Processor complete!")
     print("CSV transform saved to:", csv_transformed)
     print("HTML transform saved to:", html_transformed)
 
     print("\n-----------------------------------------------\n")
 
     
-
