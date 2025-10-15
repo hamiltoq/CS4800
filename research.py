@@ -1,26 +1,31 @@
 from pathlib import Path
 import hashlib
-import csv
 from datetime import datetime
 import xml.etree.ElementTree as ET
 from lxml import etree as LET
 from lxml import etree as ET
-import getpass
 import uuid
-            
+
+#data_directory: folder to be accessioned
+#output_folder: where the XML output will go            
 def generate_data_accessioner_xml(data_directory, output_folder, accession_number):
+    #setup XML namespace from Data Accessioner
     NSMAP = {None: "http://dataaccessioner.org/schema/dda-1-1",
             "premis": "info:lc/xmlns/premis-v2",
             "da": "http://dataaccessioner.org/saxon-extension",
             "fits": "http://hul.harvard.edu/ois/xml/ns/fits/fits_output"}
+    
+    #building root collection and accession elements
     collection_el = ET.Element("collection", nsmap = NSMAP, name = "")
     accession_el = ET.SubElement(collection_el, "accession", number = accession_number)
 
+    #adding information for when the data was processed
     now = datetime.now()
     ET.SubElement(accession_el, "ingest_note").text = f"transferred on {now.strftime('%a %b %d %H:%M:%S %Z %Y')}"
-    ET.SubElement(accession_el, "ingest_time").text = "00:00:00.00000"
 
+    #recursive function that goes through each subdirectory in the data
     def add_folder(parent_el, folder_path):
+        #creates a folder element for each subdirectory
         folder_el = ET.SubElement(parent_el, "folder", name = folder_path.name)
         for item in folder_path.iterdir():
             if item.is_file():
@@ -28,19 +33,22 @@ def generate_data_accessioner_xml(data_directory, output_folder, accession_numbe
             elif item.is_dir():
                 add_folder(folder_el, item)
 
+    #adding each file to the XML output
     def add_file(parent_el, file_path):
+        #gather file stats, calculates checksum, and adds the file element to the XML
         stat = file_path.stat()
         checksum = hashlib.md5(file_path.read_bytes()).hexdigest()
         file_el = ET.SubElement(parent_el, "file", name = file_path.name,
                                 last_modified = datetime.fromtimestamp(stat.st_mtime).isoformat(),
                                 size = str(stat.st_size), MD5 = checksum)
 
+        #adding identifiers to the XML file
         premis_obj = ET.SubElement(file_el, "{info:lc/xmlns/premis-v2}object", nsmap = NSMAP)
-
         premis_id = ET.SubElement(premis_obj, "{info:lc/xmlns/premis-v2}objectIdentifier")
         ET.SubElement(premis_id, "{info:lc/xmlns/premis-v2}objectIdentifierType").text = "uuid"
         ET.SubElement(premis_id, "{info:lc/xmlns/premis-v2}objectIdentifierValue").text = str(uuid.uuid4())
         
+        #adding checksum information
         premis_char = ET.SubElement(premis_obj, "{info:lc/xmlns/premis-v2}objectCharacteristics")
         fixity = ET.SubElement(premis_char, "{info:lc/xmlns/premis-v2}fixity")
         ET.SubElement(fixity, "{info:lc/xmlns/premis-v2}messageDigestAlgorithm").text = "MD5"
@@ -49,8 +57,10 @@ def generate_data_accessioner_xml(data_directory, output_folder, accession_numbe
         ET.SubElement(premis_char, "{info:lc/xmlns/premis-v2}size").text = str(stat.st_size)
         ET.SubElement(premis_obj, "{info:lc/xmlns/premis-v2}originalName").text = file_path.name
 
+    #run recursive folder scanning
     add_folder(accession_el, Path(data_directory))
 
+    #creating and writing the complete XML tree to the output file
     tree = ET.ElementTree(collection_el)
     output_file = Path(output_folder) / f"{accession_number}.xml"
     tree.write(str(output_file), encoding = "UTF-8", xml_declaration = True, pretty_print = True)
@@ -58,14 +68,19 @@ def generate_data_accessioner_xml(data_directory, output_folder, accession_numbe
     print(f"Data Accessioner complete! XML in {output_file}")
     return output_file
 
+
+#xml_input: the output from data accessioner
+#xslt_file: the xslt stylesheet (for CSV or HTML)
+#output_file: where the output will be saved
 def run_xslt_processor(xml_input, xslt_file, output_file):
+    #loading the XML input and stylesheet
     xml_tree = LET.parse(str(xml_input))
     xslt_tree = LET.parse(str(xslt_file))
     transform = LET.XSLT(xslt_tree)
     result = transform(xml_tree)
 
+    #converting the result to a string then writing it to the output file
     result_str = str(result)
-
     with open(output_file, "w", encoding = "utf-8") as f:
         f.write(result_str)
     
@@ -82,7 +97,6 @@ if __name__ == "__main__":
     data = Path(r"M:\Working Groups\DSU\Art on Campus\UNI Art Exhibitions 2011-2012\Pamphlets")
 
     xml_report = generate_data_accessioner_xml(data, folder, accession_number)
-
 
     print("\n-----------------------------------------------\n")
 
