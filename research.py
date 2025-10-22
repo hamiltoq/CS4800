@@ -5,6 +5,8 @@ import xml.etree.ElementTree as ET
 from lxml import etree as LET
 from lxml import etree as ET
 import uuid
+import logging
+import csv
 
 #data_directory: folder to be accessioned
 #output_folder: where the XML output will go            
@@ -63,6 +65,7 @@ def generate_data_accessioner_xml(data_directory, output_folder, accession_numbe
     #creating and writing the complete XML tree to the output file
     tree = ET.ElementTree(collection_el)
     output_file = Path(output_folder) / f"{accession_number}.xml"
+    Path(output_folder).mkdir(parents=True, exist_ok=True)
     tree.write(str(output_file), encoding = "UTF-8", xml_declaration = True, pretty_print = True)
     
     print(f"Data Accessioner complete! XML in {output_file}")
@@ -87,14 +90,84 @@ def run_xslt_processor(xml_input, xslt_file, output_file):
     return output_file
     
 
-#def run_dafixity():
+def run_dafixity(xml_input, output_folder):
+    outout_folder = Path(output_folder)
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    log_file = output_folder / f"dafixity_{timestamp}.log"
+    csv_file = output_folder / f"dafixity_{timestamp}.csv"
+
+    logging.basicConfig(level = logging.INFO, 
+                        format = "%(asctime)s [%(levelname)s] %(message)s",
+                        handlers=[logging.FileHandler(log_file, mode="w", encoding="utf-8"),
+                                    logging.StreamHandler()])
+    
+    logging.info("--- Starting Checksum Verification ---")
+    logging.info(f"Input XML: {xml_input}")
+    logging.info(f"Output: {csv_file}")
+
+    results = []
+
+    try:
+        tree = LET.parse9str(xml_input)
+        root = tree.getroot()
+    except Exception as e:
+        logging.error(f"Failed to parse XML file: {e}")
+        return None
+
+    for file_el in root.xpath("//default:file", namespaces = {"default":"http://dataaccessioner.org/schema/dda-1-1"}):
+        file_name = file_el.get("name")
+        md5_stored = file_el.get("MD5")
+        directory = file_el.get("directory") or "Unknown"
+
+        parent_folders = []
+        parent = file_el.getparent()
+        while parent is not None and parent.tag.endswith("folder"):
+            parent_folders.insert(0, parent.get("name"))
+            parent = parent.getparent()
+        
+        folder_path = Path(*parent_folders)
+        file_path = folder_path / file_name
+
+        md5_new = None
+        status = "OK"
+        error_message = ""
+
+        try:
+            if not file_path.exists():
+                status = "MISSING"
+                error_message = "File not found"
+            else:
+                md5_new = hashlib.md5(file_path.read_bytes()).hexdigest()
+                if md5_new != md5_stored:
+                    status = "MISMATCH"
+        except Exception as e:
+            status = "ERROR"
+            error_message = str(e)
+        
+        results.append({"file_path": str(file_path),
+                        "stored_md5": md5_new if md5_new else "",
+                        "status": status,
+                        "error": error_message})
+        
+        logging.info(f"[{status}] {file_path}")
+        if error_message:
+            logging.warning(f"  {error_message}")
+    
+    with open(csv_file, "w", newline = "", encoding = "utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames = ["file+path", "stored_md5", "computer_md5", "status", "error"])
+        writer.writeheader()
+        writer.writerows(results)
+
+    logging.info("--- Checksum Verification Complete ---")
+    logging.info(f"Results saved to {csv_file}")
+    return csv_file, log_file
 
 
 if __name__ == "__main__":
     #Data Accessioner
     folder = "output"
     accession_number = "2025-101"
-    data = Path(r"M:\Working Groups\DSU\Art on Campus\UNI Art Exhibitions 2011-2012\Pamphlets")
+    data = Path(r"C:\Users\quinn\Downloads\Hal Wohl-20251022T164146Z-1-001\Hal Wohl")
 
     xml_report = generate_data_accessioner_xml(data, folder, accession_number)
 
@@ -116,4 +189,13 @@ if __name__ == "__main__":
 
     print("\n-----------------------------------------------\n")
 
+
+    #DAFixity
+    fixity_csv, fixity_log = run_dafixity(xml_report, folder)
+
+    print("DAFixity complete!")
+    print("Fixity CSV: ", fixity_csv)
+    print("Fixity log: ", fixity_log)
+
     
+
