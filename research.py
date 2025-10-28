@@ -211,8 +211,9 @@ if __name__ == "__main__":
 
     
     #XSLT Processor
-    xslt_csv = Path(r"C:\Users\Public\Desktop\XSLTProcessor-1.2\xslt\files.csv.xslt")
-    xslt_html = Path(r"C:\Users\Public\Desktop\XSLTProcessor-1.2\xslt\files.html.xslt")
+    script_dir = Path(__file__).parent
+    xslt_csv = script_dir / "files.csv.xslt"
+    xslt_html = script_dir / "files.html.xslt"
     csv_transformed = xml_report.with_name(xml_report.stem + "_files.csv")
     html_transformed = xml_report.with_name(xml_report.stem + "_files.html")
 
@@ -232,3 +233,4 @@ if __name__ == "__main__":
     print("DAFixity complete!")
     print("Fixity CSV: ", fixity_csv)
     print("Fixity log: ", fixity_log)
+
