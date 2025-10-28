@@ -90,43 +90,55 @@ def run_xslt_processor(xml_input, xslt_file, output_file):
     return output_file
     
 
-def run_dafixity(xml_input, output_folder):
-    outout_folder = Path(output_folder)
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    log_file = output_folder / f"dafixity_{timestamp}.log"
-    csv_file = output_folder / f"dafixity_{timestamp}.csv"
+def run_dafixity(xml_input, output_folder, accession_number, data_directory=None):
+    output_folder = Path(output_folder)
+    output_folder.mkdir(parents=True, exist_ok=True)
+    if data_directory:
+        data_directory = Path(data_directory)
 
-    logging.basicConfig(level = logging.INFO, 
-                        format = "%(asctime)s [%(levelname)s] %(message)s",
-                        handlers=[logging.FileHandler(log_file, mode="w", encoding="utf-8"),
-                                    logging.StreamHandler()])
-    
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    log_file = output_folder / f"dafixity_{accession_number}.log"
+    csv_file = output_folder / f"dafixity_{accession_number}.csv"
+
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s [%(levelname)s] %(message)s",
+        handlers=[logging.FileHandler(log_file, mode="w", encoding="utf-8")]
+    )
+
     logging.info("--- Starting Checksum Verification ---")
     logging.info(f"Input XML: {xml_input}")
-    logging.info(f"Output: {csv_file}")
+    logging.info(f"Output CSV: {csv_file}")
 
     results = []
 
     try:
-        tree = LET.parse9str(xml_input)
+        tree = LET.parse(str(xml_input))
         root = tree.getroot()
     except Exception as e:
         logging.error(f"Failed to parse XML file: {e}")
         return None
 
-    for file_el in root.xpath("//default:file", namespaces = {"default":"http://dataaccessioner.org/schema/dda-1-1"}):
+    for file_el in root.xpath("//default:file", namespaces={"default": "http://dataaccessioner.org/schema/dda-1-1"}):
         file_name = file_el.get("name")
         md5_stored = file_el.get("MD5")
-        directory = file_el.get("directory") or "Unknown"
 
         parent_folders = []
         parent = file_el.getparent()
         while parent is not None and parent.tag.endswith("folder"):
             parent_folders.insert(0, parent.get("name"))
             parent = parent.getparent()
-        
+
         folder_path = Path(*parent_folders)
-        file_path = folder_path / file_name
+
+        if data_directory:
+            base_name = data_directory.name
+            if parent_folders and parent_folders[0] == base_name:
+                file_path = data_directory.parent / folder_path / file_name
+            else:
+                file_path = data_directory / folder_path / file_name
+        else:
+            file_path = folder_path / file_name
 
         md5_new = None
         status = "OK"
@@ -143,18 +155,21 @@ def run_dafixity(xml_input, output_folder):
         except Exception as e:
             status = "ERROR"
             error_message = str(e)
-        
-        results.append({"file_path": str(file_path),
-                        "stored_md5": md5_new if md5_new else "",
-                        "status": status,
-                        "error": error_message})
-        
+
+        results.append({
+            "file_path": str(file_path),
+            "stored_md5": md5_stored or "",
+            "computed_md5": md5_new or "",
+            "status": status,
+            "error": error_message
+        })
+
         logging.info(f"[{status}] {file_path}")
         if error_message:
             logging.warning(f"  {error_message}")
-    
-    with open(csv_file, "w", newline = "", encoding = "utf-8") as f:
-        writer = csv.DictWriter(f, fieldnames = ["file+path", "stored_md5", "computer_md5", "status", "error"])
+
+    with open(csv_file, "w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=["file_path", "stored_md5", "computed_md5", "status", "error"])
         writer.writeheader()
         writer.writerows(results)
 
@@ -163,11 +178,12 @@ def run_dafixity(xml_input, output_folder):
     return csv_file, log_file
 
 
+
 if __name__ == "__main__":
     #Data Accessioner
     folder = "output"
     accession_number = "2025-101"
-    data = Path(r"C:\Users\quinn\Downloads\Hal Wohl-20251022T164146Z-1-001\Hal Wohl")
+    data = Path(r"C:\Users\lib-hamiltoq\Downloads\UA2020-53-20250917T183847Z-1-001\UA2020-53\Hal Wohl")
 
     xml_report = generate_data_accessioner_xml(data, folder, accession_number)
 
@@ -191,11 +207,8 @@ if __name__ == "__main__":
 
 
     #DAFixity
-    fixity_csv, fixity_log = run_dafixity(xml_report, folder)
+    fixity_csv, fixity_log = run_dafixity(xml_report, folder, accession_number, data)
 
     print("DAFixity complete!")
     print("Fixity CSV: ", fixity_csv)
     print("Fixity log: ", fixity_log)
-
-    
-
