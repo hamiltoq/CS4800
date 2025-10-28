@@ -7,50 +7,69 @@ from lxml import etree as ET
 import uuid
 import logging
 import csv
+import os
+import shutil
 
-#data_directory: folder to be accessioned
-#output_folder: where the XML output will go            
 def generate_data_accessioner_xml(data_directory, output_folder, accession_number):
-    #setup XML namespace from Data Accessioner
-    NSMAP = {None: "http://dataaccessioner.org/schema/dda-1-1",
-            "premis": "info:lc/xmlns/premis-v2",
-            "da": "http://dataaccessioner.org/saxon-extension",
-            "fits": "http://hul.harvard.edu/ois/xml/ns/fits/fits_output"}
-    
-    #building root collection and accession elements
-    collection_el = ET.Element("collection", nsmap = NSMAP, name = "")
-    accession_el = ET.SubElement(collection_el, "accession", number = accession_number)
+    # Setup XML namespace (same as Data Accessioner)
+    NSMAP = {
+        None: "http://dataaccessioner.org/schema/dda-1-1",
+        "premis": "info:lc/xmlns/premis-v2",
+        "da": "http://dataaccessioner.org/saxon-extension",
+        "fits": "http://hul.harvard.edu/ois/xml/ns/fits/fits_output"
+    }
 
-    #adding information for when the data was processed
+    data_directory = Path(data_directory)
+    output_folder = Path(output_folder)
+    
+    # Create subfolder named after the accession number (for copied files)
+    accession_folder = output_folder / accession_number
+    accession_folder.mkdir(parents=True, exist_ok=True)
+
+    # Create XML structure
+    collection_el = ET.Element("collection", nsmap=NSMAP, name="")
+    accession_el = ET.SubElement(collection_el, "accession", number=accession_number)
+
+    # Add ingest note
     now = datetime.now()
     ET.SubElement(accession_el, "ingest_note").text = f"transferred on {now.strftime('%a %b %d %H:%M:%S %Z %Y')}"
 
-    #recursive function that goes through each subdirectory in the data
-    def add_folder(parent_el, folder_path):
-        #creates a folder element for each subdirectory
-        folder_el = ET.SubElement(parent_el, "folder", name = folder_path.name)
+    # Recursive folder processing
+    def add_folder(parent_el, folder_path, rel_path=Path()):
+        folder_el = ET.SubElement(parent_el, "folder", name=folder_path.name)
         for item in folder_path.iterdir():
+            if item.name.startswith('.'):
+                continue  # skip hidden files
+            relative_item_path = rel_path / item.name
             if item.is_file():
-                add_file(folder_el, item)
+                add_file(folder_el, item, relative_item_path)
             elif item.is_dir():
-                add_folder(folder_el, item)
+                add_folder(folder_el, item, relative_item_path)
 
-    #adding each file to the XML output
-    def add_file(parent_el, file_path):
-        #gather file stats, calculates checksum, and adds the file element to the XML
+    # Copy files and add XML entries
+    def add_file(parent_el, file_path, relative_item_path):
+        dest_path = accession_folder / relative_item_path
+        dest_path.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(file_path, dest_path)
+
         stat = file_path.stat()
         checksum = hashlib.md5(file_path.read_bytes()).hexdigest()
-        file_el = ET.SubElement(parent_el, "file", name = file_path.name,
-                                last_modified = datetime.fromtimestamp(stat.st_mtime).isoformat(),
-                                size = str(stat.st_size), MD5 = checksum)
 
-        #adding identifiers to the XML file
-        premis_obj = ET.SubElement(file_el, "{info:lc/xmlns/premis-v2}object", nsmap = NSMAP)
+        file_el = ET.SubElement(
+            parent_el,
+            "file",
+            name=file_path.name,
+            last_modified=datetime.fromtimestamp(stat.st_mtime).isoformat(),
+            size=str(stat.st_size),
+            MD5=checksum
+        )
+
+        # Add PREMIS metadata
+        premis_obj = ET.SubElement(file_el, "{info:lc/xmlns/premis-v2}object", nsmap=NSMAP)
         premis_id = ET.SubElement(premis_obj, "{info:lc/xmlns/premis-v2}objectIdentifier")
         ET.SubElement(premis_id, "{info:lc/xmlns/premis-v2}objectIdentifierType").text = "uuid"
         ET.SubElement(premis_id, "{info:lc/xmlns/premis-v2}objectIdentifierValue").text = str(uuid.uuid4())
-        
-        #adding checksum information
+
         premis_char = ET.SubElement(premis_obj, "{info:lc/xmlns/premis-v2}objectCharacteristics")
         fixity = ET.SubElement(premis_char, "{info:lc/xmlns/premis-v2}fixity")
         ET.SubElement(fixity, "{info:lc/xmlns/premis-v2}messageDigestAlgorithm").text = "MD5"
@@ -59,17 +78,18 @@ def generate_data_accessioner_xml(data_directory, output_folder, accession_numbe
         ET.SubElement(premis_char, "{info:lc/xmlns/premis-v2}size").text = str(stat.st_size)
         ET.SubElement(premis_obj, "{info:lc/xmlns/premis-v2}originalName").text = file_path.name
 
-    #run recursive folder scanning
-    add_folder(accession_el, Path(data_directory))
+    # Start folder recursion
+    add_folder(accession_el, data_directory)
 
-    #creating and writing the complete XML tree to the output file
-    tree = ET.ElementTree(collection_el)
-    output_file = Path(output_folder) / f"{accession_number}.xml"
-    Path(output_folder).mkdir(parents=True, exist_ok=True)
-    tree.write(str(output_file), encoding = "UTF-8", xml_declaration = True, pretty_print = True)
-    
-    print(f"Data Accessioner complete! XML in {output_file}")
-    return output_file
+    # XML file goes in the *main* output folder (not inside accession folder)
+    xml_output_file = output_folder / f"{accession_number}.xml"
+    ET.ElementTree(collection_el).write(str(xml_output_file), encoding="UTF-8", xml_declaration=True, pretty_print=True)
+
+    print(f"Data Accessioner complete!")
+    print(f"Files copied to: {accession_folder}")
+    print(f"XML saved to: {xml_output_file}")
+
+    return xml_output_file
 
 
 #xml_input: the output from data accessioner
