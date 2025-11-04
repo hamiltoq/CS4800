@@ -1,52 +1,77 @@
-from tkinter import *
-from tkinter import ttk
-from tkinter import filedialog as fd
-from tkinter.messagebox import showinfo
-
 #select input directory
 #select output directory
 #input accession number 
 #select whether to move or copy files (xslt processor)
 
+import tkinter as tk
+from tkinter import filedialog, messagebox
+from pathlib import Path
+from cs4800 import generate_data_accessioner_xml, run_xslt_processor, run_dafixity
 
-window = Tk()
-window.geometry("420x420")
-window.title("Automated Archival Process")
+def run_pipeline():
+    data_dir = input_dir_var.get()
+    out_dir = output_dir_var.get()
+    accession_number = accession_var.get().strip()
+    move_files = move_var.get()
 
-labelDA = Label(window, text="Data Accessioner", font=("Arial", 15, "bold"))
-labelDA.pack()
+    if not data_dir or not out_dir or not accession_number:
+        messagebox.showerror("Missing Information", "Please fill in all fields before running.")
+        return
 
-labelXSLT = Label(window, text="XSLT Processor", font=("Arial", 15, "bold"))
-labelXSLT.pack()
+    try:
+        #Data Accessioner
+        xml_report = generate_data_accessioner_xml(data_dir, out_dir, accession_number, move_files)
 
-labelDAF = Label(window, text="DAFixity", font=("Arial", 15, "bold"))
-labelDAF.pack()
+        #XSLT Processor
+        script_dir = Path(__file__).parent
+        xslt_csv = script_dir / "files.csv.xslt"
+        xslt_html = script_dir / "files.html.xslt"
 
-def select_file():
-    filetypes = (
-        ('All files', '*.*'),
-        ('Text files', '*.txt')
-    )
+        csv_transformed = Path(out_dir) / f"{accession_number}_files.csv"
+        html_transformed = Path(out_dir) / f"{accession_number}_files.html"
 
-    filename = fd.askopenfilename(
-        title='Open a file',
-        initialdir='/',
-        filetypes=filetypes)
+        run_xslt_processor(xml_report, xslt_csv, csv_transformed)
+        run_xslt_processor(xml_report, xslt_html, html_transformed)
 
-    showinfo(
-        title='Selected File',
-        message=filename
-    )
+        #DAFixity
+        fixity_csv, fixity_log = run_dafixity(xml_report, out_dir, accession_number, Path(data_dir))
 
+        messagebox.showinfo(
+            "Pipeline Complete",
+            f"Data Accessioner complete!\n"
+            f"XML: {xml_report}\n\n"
+            f"XSLT Processor complete!\n"
+            f"CSV: {csv_transformed}\nHTML: {html_transformed}\n\n"
+            f"DAFixity complete!\n"
+            f"Fixity CSV: {fixity_csv}\nFixity Log: {fixity_log}"
+        )
 
-open_button = ttk.Button(
-    window,
-    text='Choose File',
-    command=select_file
-)
-
-open_button.pack(expand=True)
+    except Exception as e:
+        messagebox.showerror("Pipeline Error", f"An error occurred:\n\n{e}")
 
 
-window.mainloop()
+root = tk.Tk()
+root.title("Data Accessioner GUI")
+root.geometry("550x300")
 
+input_dir_var = tk.StringVar()
+output_dir_var = tk.StringVar()
+accession_var = tk.StringVar()
+move_var = tk.BooleanVar()
+
+tk.Label(root, text="Input Directory:").grid(row=0, column=0, sticky="e", padx=10, pady=5)
+tk.Entry(root, textvariable=input_dir_var, width=40).grid(row=0, column=1, pady=5)
+tk.Button(root, text="Browse", command=lambda: input_dir_var.set(filedialog.askdirectory())).grid(row=0, column=2, padx=5)
+
+tk.Label(root, text="Output Directory:").grid(row=1, column=0, sticky="e", padx=10, pady=5)
+tk.Entry(root, textvariable=output_dir_var, width=40).grid(row=1, column=1, pady=5)
+tk.Button(root, text="Browse", command=lambda: output_dir_var.set(filedialog.askdirectory())).grid(row=1, column=2, padx=5)
+
+tk.Label(root, text="Accession Number:").grid(row=2, column=0, sticky="e", padx=10, pady=5)
+tk.Entry(root, textvariable=accession_var, width=25).grid(row=2, column=1, pady=5)
+
+tk.Checkbutton(root, text="Move files instead of copy", variable=move_var).grid(row=3, column=1, sticky="w", pady=5)
+
+tk.Button(root, text="Run Pipeline", command=run_pipeline, bg="#4CAF50", fg="white", width=15).grid(row=5, column=1, pady=20)
+
+root.mainloop()
