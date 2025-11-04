@@ -3,6 +3,12 @@ from tkinter import ttk
 from tkinter import filedialog as fd
 from tkinter.messagebox import showinfo
 
+#select input directory
+#select output directory
+#input accession number 
+#select whether to move or copy files (xslt processor)
+
+
 window = Tk()
 window.geometry("420x420")
 window.title("Automated Archival Process")
