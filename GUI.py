@@ -51,7 +51,7 @@ def run_pipeline():
 
 
 root = tk.Tk()
-root.title("Data Accessioner GUI")
+root.title("Archival Pipeline")
 root.geometry("550x300")
 
 input_dir_var = tk.StringVar()

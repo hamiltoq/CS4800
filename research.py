@@ -9,10 +9,7 @@ import shutil
 
 #Data Accessioner
 def generate_data_accessioner_xml(data_directory, output_folder, accession_number, move_files=False):
-    """
-    Scans the input directory, copies (or moves) files to an accession folder,
-    and generates a Data Accessioner XML file in the output folder.
-    """
+    #metadata for xml output file
     NSMAP = {
         None: "http://dataaccessioner.org/schema/dda-1-1",
         "premis": "info:lc/xmlns/premis-v2",
@@ -20,41 +17,58 @@ def generate_data_accessioner_xml(data_directory, output_folder, accession_numbe
         "fits": "http://hul.harvard.edu/ois/xml/ns/fits/fits_output"
     }
 
+    #converting input and output directory to paths
     data_directory = Path(data_directory)
     output_folder = Path(output_folder)
+
+    #creating a folder inside the output directory for the input files to be copied/moved to
     accession_folder = output_folder / accession_number
     accession_folder.mkdir(parents=True, exist_ok=True)
 
+    #creating a root  xml element for collection, and adding an accession element
     collection_el = LET.Element("collection", nsmap=NSMAP, name="")
     accession_el = LET.SubElement(collection_el, "accession", number=accession_number)
 
+    #records the time and date for when the accession happened
     now = datetime.now()
     LET.SubElement(accession_el, "ingest_note").text = f"transferred on {now.strftime('%a %b %d %H:%M:%S %Z %Y')}"
 
+
     def add_folder(parent_el, folder_path, rel_path=Path()):
+        #creates a folder element for each directory
         folder_el = LET.SubElement(parent_el, "folder", name=folder_path.name)
+         
+         #goes through each item in the input directory
         for item in folder_path.iterdir():
             if item.name.startswith('.'):
                 continue
             relative_item_path = rel_path / item.name
+            #if the item is a file, it calls the add_file function
             if item.is_file():
                 add_file(folder_el, item, relative_item_path)
+            #if the item is a subfolder, it calls itself recursively
             elif item.is_dir():
                 add_folder(folder_el, item, relative_item_path)
 
+    
     def add_file(parent_el, file_path, relative_item_path):
+        #finds where to put the copied/moved files
         dest_path = accession_folder / relative_item_path
+        #creates the subfolders
         dest_path.parent.mkdir(parents=True, exist_ok=True)
 
-        # Copy or move file
+        #copy or move file
         if move_files:
             shutil.move(str(file_path), str(dest_path))
         else:
             shutil.copy2(str(file_path), str(dest_path))
 
+        #gets files size and timestamps
         stat = dest_path.stat()
+        #computes the checksum
         checksum = hashlib.md5(dest_path.read_bytes()).hexdigest()
 
+        #adds a file xml element with the name, timestamp, size, and checksum
         file_el = LET.SubElement(
             parent_el, "file",
             name=file_path.name,
@@ -63,12 +77,15 @@ def generate_data_accessioner_xml(data_directory, output_folder, accession_numbe
             MD5=checksum
         )
 
-        # PREMIS metadata
+        #metadata for xml output file
+        #creates an object under each file
         premis_obj = LET.SubElement(file_el, "{info:lc/xmlns/premis-v2}object", nsmap=NSMAP)
+        #assigns a UUID to each file to make it unique
         premis_id = LET.SubElement(premis_obj, "{info:lc/xmlns/premis-v2}objectIdentifier")
         LET.SubElement(premis_id, "{info:lc/xmlns/premis-v2}objectIdentifierType").text = "uuid"
         LET.SubElement(premis_id, "{info:lc/xmlns/premis-v2}objectIdentifierValue").text = str(uuid.uuid4())
 
+        #stores checksum infor
         premis_char = LET.SubElement(premis_obj, "{info:lc/xmlns/premis-v2}objectCharacteristics")
         fixity = LET.SubElement(premis_char, "{info:lc/xmlns/premis-v2}fixity")
         LET.SubElement(fixity, "{info:lc/xmlns/premis-v2}messageDigestAlgorithm").text = "MD5"
@@ -77,8 +94,10 @@ def generate_data_accessioner_xml(data_directory, output_folder, accession_numbe
         LET.SubElement(premis_char, "{info:lc/xmlns/premis-v2}size").text = str(stat.st_size)
         LET.SubElement(premis_obj, "{info:lc/xmlns/premis-v2}originalName").text = file_path.name
 
+    #starting the recursive scan
     add_folder(accession_el, data_directory)
 
+    #writing to the xml output file
     xml_output_file = output_folder / f"{accession_number}.xml"
     LET.ElementTree(collection_el).write(str(xml_output_file), encoding="UTF-8", xml_declaration=True, pretty_print=True)
 
