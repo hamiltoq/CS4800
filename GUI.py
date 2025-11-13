@@ -72,6 +72,6 @@ tk.Entry(root, textvariable=accession_var, width=25).grid(row=2, column=1, pady=
 
 tk.Checkbutton(root, text="Move files instead of copy", variable=move_var).grid(row=3, column=1, sticky="w", pady=5)
 
-tk.Button(root, text="Run Pipeline", command=run_pipeline, bg="#4CAF50", fg="white", width=15).grid(row=5, column=1, pady=20)
+tk.Button(root, text="Run", command=run_pipeline, bg="#0047AB", fg="white", width=15).grid(row=5, column=1, pady=20)
 
 root.mainloop()
