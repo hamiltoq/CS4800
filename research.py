@@ -6,6 +6,8 @@ import uuid
 import logging
 import csv
 import shutil
+import os
+import time
 
 # Data Accessioner
 def generate_data_accessioner_xml(data_directory, output_folder, accession_number, move_files=False):
@@ -38,6 +40,42 @@ def generate_data_accessioner_xml(data_directory, output_folder, accession_numbe
             shutil.move(str(file_path), str(dest_path))
         else:
             shutil.copy2(str(file_path), str(dest_path))
+
+        stat_src = file_path.stat()
+        os.utime(dest_path, (stat_src.st_atime, stat_src.st_mtime))
+
+        # Preserve creation time on Windows
+        if hasattr(os, "utime") and os.name == "nt":
+            import ctypes
+            from ctypes import wintypes
+
+            FILE_WRITE_ATTRIBUTES = 0x0100
+            handle = ctypes.windll.kernel32.CreateFileW(
+                str(dest_path),
+                FILE_WRITE_ATTRIBUTES,
+                0,
+                None,
+                3,
+                0,
+                None
+            )
+
+            if handle != -1:
+                # Convert Unix timestamp → Windows FILETIME
+                def to_filetime(t):
+                    return int((t * 10000000) + 116444736000000000)
+
+                ctime = to_filetime(stat_src.st_ctime)
+                ctime_low = ctime & 0xFFFFFFFF
+                ctime_high = ctime >> 32
+
+                class FILETIME(ctypes.Structure):
+                    _fields_ = [("dwLowDateTime", wintypes.DWORD),
+                                ("dwHighDateTime", wintypes.DWORD)]
+
+                ft = FILETIME(ctime_low, ctime_high)
+                ctypes.windll.kernel32.SetFileTime(handle, ctypes.byref(ft), None, None)
+                ctypes.windll.kernel32.CloseHandle(handle)
 
         checksum = hashlib.md5(dest_path.read_bytes()).hexdigest()
         file_el = LET.SubElement(
