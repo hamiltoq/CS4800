@@ -19,7 +19,7 @@ def generate_data_accessioner_xml(data_directory, output_folder, accession_numbe
     accession_folder = output_folder / accession_number
     accession_folder.mkdir(parents=True, exist_ok=True)
 
-    #metadate for xml output file
+    #metadata for xml output file
     NSMAP = {
         None: "http://dataaccessioner.org/schema/dda-1-1",
         "premis": "info:lc/xmlns/premis-v2",
@@ -30,25 +30,38 @@ def generate_data_accessioner_xml(data_directory, output_folder, accession_numbe
     accession_el = LET.SubElement(collection_el, "accession", number=accession_number)
     LET.SubElement(accession_el, "ingest_note").text = f"Transferred on {datetime.now().isoformat()}"
 
+    #looping over every file in the input directory
     for file_path in data_directory.rglob("*"):
+        
+        #if it's not a file, skip
         if not file_path.is_file():
             continue
+
+        #computing the relative path
         rel_path = file_path.relative_to(data_directory)
+        
+        #creates the subfolders in the accession folder
         dest_path = accession_folder / rel_path
         dest_path.parent.mkdir(parents=True, exist_ok=True)
+
+        #moves or copies the files based on user input
         if move_files:
             shutil.move(str(file_path), str(dest_path))
         else:
             shutil.copy2(str(file_path), str(dest_path))
 
+        #reads the metadata from the original file
         stat_src = file_path.stat()
+
+        #sets the new files creation date to match the original
         os.utime(dest_path, (stat_src.st_atime, stat_src.st_mtime))
 
-        # Preserve creation time on Windows
+        #preserve creation time on Windows
         if hasattr(os, "utime") and os.name == "nt":
             import ctypes
             from ctypes import wintypes
 
+            #opens the file and edits timestamps
             FILE_WRITE_ATTRIBUTES = 0x0100
             handle = ctypes.windll.kernel32.CreateFileW(
                 str(dest_path),
@@ -61,23 +74,28 @@ def generate_data_accessioner_xml(data_directory, output_folder, accession_numbe
             )
 
             if handle != -1:
-                # Convert Unix timestamp → Windows FILETIME
+                #convert Unix timestamp to Windows FILETIME
                 def to_filetime(t):
                     return int((t * 10000000) + 116444736000000000)
 
+                #building the FILETIME structure
                 ctime = to_filetime(stat_src.st_ctime)
                 ctime_low = ctime & 0xFFFFFFFF
                 ctime_high = ctime >> 32
-
+                
                 class FILETIME(ctypes.Structure):
                     _fields_ = [("dwLowDateTime", wintypes.DWORD),
                                 ("dwHighDateTime", wintypes.DWORD)]
 
+                #writing the original creation timestamp
                 ft = FILETIME(ctime_low, ctime_high)
                 ctypes.windll.kernel32.SetFileTime(handle, ctypes.byref(ft), None, None)
                 ctypes.windll.kernel32.CloseHandle(handle)
 
+        #computing the checksum of the current file
         checksum = hashlib.md5(dest_path.read_bytes()).hexdigest()
+
+        #adding the file entry to XML
         file_el = LET.SubElement(
             accession_el,
             "file",
@@ -104,10 +122,12 @@ def generate_data_accessioner_xml(data_directory, output_folder, accession_numbe
             try:
                 if folder.is_dir() and not any(folder.iterdir()):
                     folder.rmdir()
+                    
             except Exception:
-                # ignore folders that aren't empty or fail due to permissions
-                pass  
-        # optionally remove the top-level folder if it's empty
+                #ignore folders that aren't empty or fail due to permissions
+                pass
+            
+        #optionally remove the top-level folder if it's empty
         try:
             if not any(data_directory.iterdir()):
                 data_directory.rmdir()
@@ -119,10 +139,19 @@ def generate_data_accessioner_xml(data_directory, output_folder, accession_numbe
 
 # XSLT Processor
 def run_xslt_processor(xml_input, xslt_file, output_file):
+    #parse the XML input into a tree structure
     xml_tree = LET.parse(str(xml_input))
+
+    #parse the XSLT stylesheet into an XML tree
     xslt_tree = LET.parse(str(xslt_file))
+
+    #convert the XSLT tree into a transform object
     transform = LET.XSLT(xslt_tree)
+
+    #apply the XSLT transform to the XML input
     result = transform(xml_tree)
+
+    #write the transformed content
     with open(output_file, "w", encoding="utf-8") as f:
         f.write(str(result))
     return output_file
@@ -130,40 +159,71 @@ def run_xslt_processor(xml_input, xslt_file, output_file):
 
 # DA Fixity
 def run_dafixity(xml_input, output_folder, accession_number, data_directory=None):
+    #convert the output folder to a path
     output_folder = Path(output_folder)
+
+    #builds the path to the accession folder that was created in Data Accessioner function
     accession_folder = output_folder / accession_number
+
+    #if the accession folder exists, use that as data directory
+    #otherwise use the original input directory 
     data_directory = accession_folder if accession_folder.exists() else Path(data_directory)
 
+    #defines the log and CSV files and where they should be written
     log_file = output_folder / f"dafixity_{accession_number}.log"
     csv_file = output_folder / f"dafixity_{accession_number}.csv"
 
+    #clears existing logging
     for h in logging.root.handlers[:]:
         logging.root.removeHandler(h)
+
+    #configures logging to all messages are written to the log file
     logging.basicConfig(level=logging.INFO, handlers=[logging.FileHandler(log_file, "w", encoding="utf-8")])
 
+    #loads and parses the XML from Data Accessioner
     tree = LET.parse(str(xml_input))
     root = tree.getroot()
+
+    #creating a list to add each file's checksum comparison result
     results = []
 
+    #finds all of the file elements in the XML
     for file_el in root.xpath("//default:file", namespaces={"default": "http://dataaccessioner.org/schema/dda-1-1"}):
+        #extracts the file's relative path
         rel = Path(file_el.get("name"))
+
+        #constructs the full filesystem path to the actual file in the accession folder
         file_path = data_directory / rel
+
+        #reads the checksum from the XML
         md5_stored = file_el.get("MD5")
+
+        #initializes default values
         status = "OK"
         computed_md5 = ""
         error = ""
+
         try:
+            #if the file is missing, mark MISSING
             if not file_path.exists():
                 status = "MISSING"
                 error = "File not found"
+
+            
             else:
+                #compute the new checksum, and compare it to the stored checksum
                 computed_md5 = hashlib.md5(file_path.read_bytes()).hexdigest()
+
+                #if the checksums are different, mark MISMATCH
                 if computed_md5 != md5_stored:
                     status = "MISMATCH"
+
+        #if an error occurs, mark ERROR
         except Exception as e:
             status = "ERROR"
             error = str(e)
 
+        #save all of the information to the results list
         results.append({
             "file_path": str(file_path),
             "stored_md5": md5_stored or "",
@@ -171,8 +231,11 @@ def run_dafixity(xml_input, output_folder, accession_number, data_directory=None
             "status": status,
             "error": error,
         })
+
+        #write a log entry to document the results
         logging.info(f"[{status}] {file_path}")
 
+    #open the CSV and write the results
     with open(csv_file, "w", newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(f, fieldnames=["file_path", "stored_md5", "computed_md5", "status", "error"])
         writer.writeheader()
