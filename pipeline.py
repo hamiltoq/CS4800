@@ -25,7 +25,7 @@ def generate_data_accessioner_xml(data_directory, output_folder, accession_numbe
         "premis": "info:lc/xmlns/premis-v2",
     }
 
-    #creating a root  xml element for collection, and adding an accession element
+    #creating a root xml element for collection, and adding an accession element
     collection_el = LET.Element("collection", nsmap=NSMAP)
     accession_el = LET.SubElement(collection_el, "accession", number=accession_number)
     LET.SubElement(accession_el, "ingest_note").text = f"Transferred on {datetime.now().isoformat()}"
@@ -33,69 +33,75 @@ def generate_data_accessioner_xml(data_directory, output_folder, accession_numbe
     #looping over every file in the input directory
     for file_path in data_directory.rglob("*"):
         
-        #if it's not a file, skip
+        #skip non-files
         if not file_path.is_file():
             continue
 
-        #computing the relative path
+        #get original timestamps BEFORE moving/copying
+        stat_src = file_path.stat()
+        atime = stat_src.st_atime
+        mtime = stat_src.st_mtime
+        ctime = stat_src.st_ctime
+
+        #compute the relative path
         rel_path = file_path.relative_to(data_directory)
         
-        #creates the subfolders in the accession folder
+        #create subfolders inside accession folder
         dest_path = accession_folder / rel_path
         dest_path.parent.mkdir(parents=True, exist_ok=True)
 
-        #moves or copies the files based on user input
+        #move or copy file
         if move_files:
             shutil.move(str(file_path), str(dest_path))
         else:
             shutil.copy2(str(file_path), str(dest_path))
 
-        #reads the metadata from the original file
-        stat_src = file_path.stat()
+        #restore access + modified time
+        os.utime(dest_path, (atime, mtime))
 
-        #sets the new files creation date to match the original
-        os.utime(dest_path, (stat_src.st_atime, stat_src.st_mtime))
+        #restore creation time (Windows only)
+        if os.name == "nt":
+            try:
+                import ctypes
+                from ctypes import wintypes
 
-        #preserve creation time on Windows
-        if hasattr(os, "utime") and os.name == "nt":
-            import ctypes
-            from ctypes import wintypes
+                FILE_WRITE_ATTRIBUTES = 0x0100
 
-            #opens the file and edits timestamps
-            FILE_WRITE_ATTRIBUTES = 0x0100
-            handle = ctypes.windll.kernel32.CreateFileW(
-                str(dest_path),
-                FILE_WRITE_ATTRIBUTES,
-                0,
-                None,
-                3,
-                0,
-                None
-            )
+                handle = ctypes.windll.kernel32.CreateFileW(
+                    str(dest_path),
+                    FILE_WRITE_ATTRIBUTES,
+                    0,
+                    None,
+                    3,   # OPEN_EXISTING
+                    0,
+                    None
+                )
 
-            if handle != -1:
-                #convert Unix timestamp to Windows FILETIME
-                def to_filetime(t):
-                    return int((t * 10000000) + 116444736000000000)
+                if handle != -1:
+                    def to_filetime(t):
+                        return int((t * 10000000) + 116444736000000000)
 
-                #building the FILETIME structure
-                ctime = to_filetime(stat_src.st_ctime)
-                ctime_low = ctime & 0xFFFFFFFF
-                ctime_high = ctime >> 32
-                
-                class FILETIME(ctypes.Structure):
-                    _fields_ = [("dwLowDateTime", wintypes.DWORD),
-                                ("dwHighDateTime", wintypes.DWORD)]
+                    winctime = to_filetime(ctime)
+                    
+                    class FILETIME(ctypes.Structure):
+                        _fields_ = [
+                            ("dwLowDateTime", wintypes.DWORD),
+                            ("dwHighDateTime", wintypes.DWORD)
+                        ]
 
-                #writing the original creation timestamp
-                ft = FILETIME(ctime_low, ctime_high)
-                ctypes.windll.kernel32.SetFileTime(handle, ctypes.byref(ft), None, None)
-                ctypes.windll.kernel32.CloseHandle(handle)
+                    ft = FILETIME(winctime & 0xFFFFFFFF, winctime >> 32)
 
-        #computing the checksum of the current file
+                    ctypes.windll.kernel32.SetFileTime(handle, ctypes.byref(ft), None, None)
+                    ctypes.windll.kernel32.CloseHandle(handle)
+
+            except Exception:
+                #failure is safe — continue without breaking pipeline
+                pass
+
+        #compute checksum
         checksum = hashlib.md5(dest_path.read_bytes()).hexdigest()
 
-        #adding the file entry to XML
+        #add file entry to XML
         file_el = LET.SubElement(
             accession_el,
             "file",
@@ -104,30 +110,25 @@ def generate_data_accessioner_xml(data_directory, output_folder, accession_numbe
             MD5=checksum,
         )
 
-        #metadata for xml output file
-        #creates an object under each file
+        #add PREMIS metadata
         premis_obj = LET.SubElement(file_el, "{info:lc/xmlns/premis-v2}object", nsmap=NSMAP)
-        #assigns a UUID to each file to make it unique
         premis_id = LET.SubElement(premis_obj, "{info:lc/xmlns/premis-v2}objectIdentifier")
         LET.SubElement(premis_id, "{info:lc/xmlns/premis-v2}objectIdentifierType").text = "uuid"
         LET.SubElement(premis_id, "{info:lc/xmlns/premis-v2}objectIdentifierValue").text = str(uuid.uuid4())
 
-    #writing to the xml output file
+    #write XML file
     xml_output_file = output_folder / f"{accession_number}.xml"
     LET.ElementTree(collection_el).write(str(xml_output_file), encoding="UTF-8", xml_declaration=True, pretty_print=True)
 
-    #if move files is selected, delete the original folder and subfolders from the input directory
+    #delete original directories if files were moved
     if move_files:
         for folder in sorted(data_directory.rglob("*"), reverse=True):
             try:
                 if folder.is_dir() and not any(folder.iterdir()):
                     folder.rmdir()
-                    
             except Exception:
-                #ignore folders that aren't empty or fail due to permissions
                 pass
             
-        #optionally remove the top-level folder if it's empty
         try:
             if not any(data_directory.iterdir()):
                 data_directory.rmdir()
@@ -242,3 +243,4 @@ def run_dafixity(xml_input, output_folder, accession_number, data_directory=None
         writer.writerows(results)
 
     return csv_file, log_file
+
