@@ -1,4 +1,4 @@
-# Automation for Data Accessioner, XSLTProcessor, and DAFixity programs
+# Automation for Data Accessioner and XSLTProcessor programs, and fixity checker using hashlib in Python
 
 ## Data Accessioner
 - Transfers files from disks onto a file server
@@ -15,7 +15,7 @@
 - How the function works:
     - Transfroms the XML report from previous function into a CSV and HTML report
 
-## DAFixity
+## Hashlib function
 - Parses the report from Data Accessioner, creates a list of files and their checksums, then validates those checksums with the checksums on the disk
 - Output: CSV and log report
 - How the function works:
