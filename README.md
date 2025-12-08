@@ -9,7 +9,8 @@
     - Generates an XML report
     - Recreates the full directory structure from the input directory
 - Sample output:
-    ![alt text](<Screenshot 2025-12-08 131822.png>)
+    <img width="1575" height="637" alt="Screenshot 2025-12-08 131822" src="https://github.com/user-attachments/assets/29061578-5ba5-47dd-8a93-fface00b151b" />
+
 
 ## XSLT Processor
 - Parses the report from Data Accessioner
@@ -38,3 +39,4 @@
     ![alt text](<Screenshot 2025-12-08 132132.png>)
 
 ## This project <u>mimics</u> these 3 programs for automation.
+
