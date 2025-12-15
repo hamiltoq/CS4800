@@ -159,7 +159,7 @@ def run_xslt_processor(xml_input, xslt_file, output_file):
 
 
 # DA Fixity
-def run_dafixity(xml_input, output_folder, accession_number, data_directory=None):
+def run_fixity(xml_input, output_folder, accession_number, data_directory=None):
     #convert the output folder to a path
     output_folder = Path(output_folder)
 
@@ -171,8 +171,8 @@ def run_dafixity(xml_input, output_folder, accession_number, data_directory=None
     data_directory = accession_folder if accession_folder.exists() else Path(data_directory)
 
     #defines the log and CSV files and where they should be written
-    log_file = output_folder / f"dafixity_{accession_number}.log"
-    csv_file = output_folder / f"dafixity_{accession_number}.csv"
+    log_file = output_folder / f"fixity_{accession_number}.log"
+    csv_file = output_folder / f"fixity_{accession_number}.csv"
 
     #clears existing logging
     for h in logging.root.handlers[:]:
