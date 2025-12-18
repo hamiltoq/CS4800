@@ -1,13 +1,16 @@
 ## Libraries needed for pipeline
 
+Should be included with Python installation:
 - tkinter
 - pathlib
 - hashlib
 - datetime
-- lxml
 - uuid
 - logging
 - csv
 - shutil
 - os
 - time
+
+Need to install separately:
+- lxml
