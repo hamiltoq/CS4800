@@ -1,7 +1,7 @@
 import tkinter as tk
 from tkinter import filedialog, messagebox
 from pathlib import Path
-from cs4800 import generate_data_accessioner_xml, run_xslt_processor, run_fixity
+from pipeline import generate_data_accessioner_xml, run_xslt_processor, run_fixity
 
 def run_pipeline():
     #gets all of the inputs from the GUI
