@@ -65,24 +65,30 @@ def generate_data_accessioner_xml(data_directory, output_folder, accession_numbe
                 import ctypes
                 from ctypes import wintypes
 
+                #Windows constant that allows modifying file attributes
                 FILE_WRITE_ATTRIBUTES = 0x0100
 
+                #opens the file using the Windows kernel API
                 handle = ctypes.windll.kernel32.CreateFileW(
-                    str(dest_path),
-                    FILE_WRITE_ATTRIBUTES,
-                    0,
-                    None,
-                    3,   # OPEN_EXISTING
-                    0,
-                    None
+                    str(dest_path),         #path to the file
+                    FILE_WRITE_ATTRIBUTES,  #permission to modify timestamps
+                    0,                      #share mode (no sharing)
+                    None,                   #security attributes
+                    3,                      #OPEN_EXISTING (do not create a new file)
+                    0,                      #file attributes
+                    None                    #template file
                 )
 
+                #checks that file was opened successfully
                 if handle != -1:
+                    #helper function to convert timestamps
                     def to_filetime(t):
+                        #converts Unix timestamp into a Windows FILETIME
                         return int((t * 10000000) + 116444736000000000)
 
                     winctime = to_filetime(ctime)
                     
+                    #defines the Windows FILETIME structure in Python
                     class FILETIME(ctypes.Structure):
                         _fields_ = [
                             ("dwLowDateTime", wintypes.DWORD),
@@ -91,11 +97,13 @@ def generate_data_accessioner_xml(data_directory, output_folder, accession_numbe
 
                     ft = FILETIME(winctime & 0xFFFFFFFF, winctime >> 32)
 
+                    #calls the Windows API to set the file timestamps
                     ctypes.windll.kernel32.SetFileTime(handle, ctypes.byref(ft), None, None)
+
                     ctypes.windll.kernel32.CloseHandle(handle)
 
             except Exception:
-                #failure is safe — continue without breaking pipeline
+                #if this fails, continue without breaking pipeline
                 pass
 
         #compute checksum
@@ -158,7 +166,7 @@ def run_xslt_processor(xml_input, xslt_file, output_file):
     return output_file
 
 
-# DA Fixity
+# Fixity Checker
 def run_fixity(xml_input, output_folder, accession_number, data_directory=None):
     #convert the output folder to a path
     output_folder = Path(output_folder)
