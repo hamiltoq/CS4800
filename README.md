@@ -1,4 +1,4 @@
-# Automation for Data Accessioner and XSLTProcessor programs, and fixity checker using hashlib in Python
+# Automation for Data Accessioner, XSLTProcessor, hashlib, OpenShield, and DART. 
 
 ## Data Accessioner
 - Transfers files from disks onto a file server
@@ -39,6 +39,12 @@
     - Log:
       <img width="1856" height="466" alt="Screenshot 2025-12-08 132132" src="https://github.com/user-attachments/assets/c4ef74c0-e006-4ced-b952-62ab97164c75" />
 
-## This project <u>mimics</u> these 3 programs for automation.
+## Virus scanning
+- Runs Open Shield, a simple and fast antivirus check written in Python and using a database from MalwareBazaar.
+
+## Bagging function (optional)
+- Bundles files and metadata based on APTrust's Digital Archivist's Resource Tool (DART).
+
+## This project <u>mimics</u> these 5 programs for automation.
 
 
